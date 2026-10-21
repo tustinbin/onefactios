@@ -1,17 +1,11 @@
 import SwiftUI
-import Playgrounds
 
 struct ContentView: View {
+    @StateObject private var viewModel = OneFactViewModel()
+
     var body: some View {
-        Text("Hello, world!")
-            .padding()
+        RootTabView(viewModel: viewModel)
+            .preferredColorScheme(.light)
+            .tint(AppTheme.accent)
     }
-}
-
-#Preview {
-    ContentView()
-}
-
-#Playground {
-    _ = 1 + 2
 }

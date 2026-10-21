@@ -1,0 +1,7 @@
+# Local reference + build artifacts
+_web_reference/
+DerivedData/
+
+# Xcode user-specific
+xcuserdata/
+*.xcuserstate
