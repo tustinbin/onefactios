@@ -81,7 +81,7 @@ actor FactLoader {
                     )
                 }
 
-                if let hook = result.hook {
+                if let hook = result.hook, !ContentSafety.isRestrictedTitle(hook.articleTitle) {
                     chosen = hook
                     matchedLabel = result.matchedLabel
                 }
@@ -95,11 +95,16 @@ actor FactLoader {
         }
 
         if let chosen {
-            return try await presentDYKFact(
-                chosen,
-                matchedLabel: interestsMode ? matchedLabel : nil,
-                selectedInterests: interestsMode ? selectedInterests : []
-            )
+            do {
+                return try await presentDYKFact(
+                    chosen,
+                    matchedLabel: interestsMode ? matchedLabel : nil,
+                    selectedInterests: interestsMode ? selectedInterests : []
+                )
+            } catch {
+                // Restricted / bad page — keep going to list fallback or another attempt path.
+                lastError = error
+            }
         }
 
         // List pages are Interests-only — Random stays pure DYK
@@ -134,8 +139,10 @@ actor FactLoader {
         guard !shortlist.isEmpty else { return (nil, nil) }
 
         for candidate in shortlist {
+            if ContentSafety.isRestrictedTitle(candidate.hook.articleTitle) { continue }
             do {
                 let categories = try await wikipedia.fetchCategoryTitles(forArticleTitle: candidate.hook.articleTitle)
+                if ContentSafety.isRestrictedCategories(categories) { continue }
                 let verified = candidate.matched.filter { item in
                     InterestMatching.categoriesMatchInterest(categories, interest: item.interest)
                 }
@@ -160,9 +167,22 @@ actor FactLoader {
         matchedLabel: String?,
         selectedInterests: [Interest]
     ) async throws -> LoadedFact {
+        if ContentSafety.isRestrictedTitle(hook.articleTitle) {
+            throw FactLoadError.noMatch
+        }
         let summary = try? await wikipedia.fetchSummary(title: hook.articleTitle)
+        if ContentSafety.isRestrictedSummary(summary) {
+            throw FactLoadError.noMatch
+        }
         let matchedNicheIDs = InterestMatching.matchedInterestsForHook(hook, selectedInterests: selectedInterests).map(\.id)
         let fact = FactFactory.makeFact(from: hook, summary: summary, matchedNicheIDs: matchedNicheIDs)
+        if ContentSafety.isRestrictedFactText(
+            title: fact.title,
+            summary: fact.summary,
+            highlight: fact.highlight
+        ) {
+            throw FactLoadError.noMatch
+        }
         return LoadedFact(fact: fact, matchedLabel: matchedLabel)
     }
 
@@ -210,6 +230,14 @@ actor FactLoader {
             guard !entries.isEmpty else { continue }
             let unused = entries.filter { !seenIDs.contains($0.id) }
             var pool = unused.isEmpty ? entries : unused
+            pool = pool.filter {
+                !ContentSafety.isRestrictedTitle($0.articleTitle)
+                    && !ContentSafety.isRestrictedFactText(
+                        title: $0.articleTitle,
+                        summary: $0.blurb,
+                        highlight: ""
+                    )
+            }
             guard !pool.isEmpty else { continue }
             pool.sort { a, b in
                 if a.score != b.score { return a.score > b.score }

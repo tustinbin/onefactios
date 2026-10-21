@@ -96,6 +96,8 @@ struct FactDetail: Equatable {
     let shortDescription: String
     let longExtract: String
     let categories: [String]
+    /// Section shown on the back (e.g. "Early life", "History"), when known.
+    var sectionTitle: String? = nil
 }
 
 enum FactMode: String, Codable, CaseIterable, Identifiable {

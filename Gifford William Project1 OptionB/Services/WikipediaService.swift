@@ -39,8 +39,32 @@ struct WikipediaParseDTO: Decodable, Sendable {
     struct Parse: Decodable, Sendable {
         let title: String?
         let text: TextBlob?
+        let sections: [Section]?
 
         struct TextBlob: Decodable, Sendable {
+            let star: String?
+
+            enum CodingKeys: String, CodingKey {
+                case star = "*"
+            }
+        }
+
+        struct Section: Decodable, Sendable {
+            let toclevel: Int?
+            let level: String?
+            let line: String?
+            let index: String?
+        }
+    }
+}
+
+struct WikipediaWikitextDTO: Decodable, Sendable {
+    let parse: Parse?
+
+    struct Parse: Decodable, Sendable {
+        let wikitext: Blob?
+
+        struct Blob: Decodable, Sendable {
             let star: String?
 
             enum CodingKeys: String, CodingKey {
@@ -159,23 +183,26 @@ actor WikipediaService {
         }
     }
 
-    /// Longer plaintext lead + short description for the fact-card back.
+    /// Clean closer-look copy: one full section as plaintext (no HTML/CSS), plus categories.
     func fetchArticleDetail(title: String) async throws -> FactDetail {
-        async let extractDTO = fetchPlainExtract(title: title)
         async let rawCategories = fetchCategoryTitles(forArticleTitle: title)
         async let summary = fetchSummaryIfAvailable(title: title)
+        async let sectionPick = fetchPreferredSectionPlainText(title: title)
 
-        let extract = try await extractDTO
         let categoriesRaw = (try? await rawCategories) ?? []
         let summaryDTO = await summary
+        let picked = try? await sectionPick
 
-        let page = extract.query?.pages?.values.first
-        // Keep paragraph breaks so the card back isn't one dense block.
-        let longExtract = TextUtils.normalizeParagraphs(page?.extract ?? summaryDTO?.extract ?? "")
-        let shortDescription = TextUtils.normalizeWhitespace(
-            page?.description ?? summaryDTO?.description ?? ""
-        )
+        let shortDescription = TextUtils.normalizeWhitespace(summaryDTO?.description ?? "")
         let categories = FactFactory.displayCategories(from: categoriesRaw)
+
+        let longExtract: String
+        if let picked, !picked.text.isEmpty {
+            longExtract = "== \(picked.heading) ==\n\n\(picked.text)"
+        } else {
+            // Fallback: REST summary extract, cleaned (may be shorter).
+            longExtract = TextUtils.cleanCloserLookText(summaryDTO?.extract ?? "")
+        }
 
         guard !longExtract.isEmpty || !shortDescription.isEmpty || !categories.isEmpty else {
             throw WikipediaServiceError.decode
@@ -184,24 +211,60 @@ actor WikipediaService {
         return FactDetail(
             shortDescription: shortDescription,
             longExtract: longExtract,
-            categories: categories
+            categories: categories,
+            sectionTitle: picked?.heading
         )
     }
 
-    private func fetchPlainExtract(title: String) async throws -> WikipediaExtractQueryDTO {
+    /// Full section as clean plaintext via wikitext (avoids HTML/CSS bloat from parse text).
+    private func fetchPreferredSectionPlainText(title: String) async throws -> (heading: String, text: String) {
+        let sections = try await fetchSectionIndex(title: title)
+        guard let pick = TextUtils.pickCloserLookSection(from: sections) else {
+            throw WikipediaServiceError.decode
+        }
+        let wikitext = try await fetchSectionWikitext(title: title, sectionIndex: pick.index)
+        let plain = TextUtils.wikitextToPlain(wikitext)
+        guard !plain.isEmpty else { throw WikipediaServiceError.decode }
+        return (pick.line, plain)
+    }
+
+    private func fetchSectionIndex(title: String) async throws -> [TextUtils.WikiSectionRef] {
         var components = URLComponents(string: "https://en.wikipedia.org/w/api.php")!
         components.queryItems = [
-            .init(name: "action", value: "query"),
-            .init(name: "prop", value: "extracts|description"),
-            .init(name: "titles", value: title),
-            .init(name: "explaintext", value: "1"),
-            .init(name: "exsectionformat", value: "plain"),
-            .init(name: "exchars", value: "2200"),
+            .init(name: "action", value: "parse"),
+            .init(name: "page", value: title),
+            .init(name: "prop", value: "sections"),
             .init(name: "format", value: "json"),
             .init(name: "origin", value: "*"),
             .init(name: "redirects", value: "1")
         ]
-        return try await fetchJSON(url: components.url!)
+        let dto: WikipediaParseDTO = try await fetchJSON(url: components.url!)
+        return (dto.parse?.sections ?? []).compactMap { section in
+            guard let indexString = section.index, let index = Int(indexString) else { return nil }
+            let line = TextUtils.stripHTML(section.line ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { return nil }
+            let level = Int(section.level ?? "") ?? section.toclevel ?? 2
+            return TextUtils.WikiSectionRef(index: index, line: line, level: level)
+        }
+    }
+
+    private func fetchSectionWikitext(title: String, sectionIndex: Int) async throws -> String {
+        var components = URLComponents(string: "https://en.wikipedia.org/w/api.php")!
+        components.queryItems = [
+            .init(name: "action", value: "parse"),
+            .init(name: "page", value: title),
+            .init(name: "prop", value: "wikitext"),
+            .init(name: "section", value: String(sectionIndex)),
+            .init(name: "format", value: "json"),
+            .init(name: "origin", value: "*"),
+            .init(name: "redirects", value: "1")
+        ]
+        let dto: WikipediaWikitextDTO = try await fetchJSON(url: components.url!)
+        guard let text = dto.parse?.wikitext?.star, !text.isEmpty else {
+            throw WikipediaServiceError.decode
+        }
+        return text
     }
 
     private func fetchSummaryIfAvailable(title: String) async -> WikipediaSummaryDTO? {

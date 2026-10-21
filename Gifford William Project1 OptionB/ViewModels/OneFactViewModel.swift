@@ -18,6 +18,20 @@ final class OneFactViewModel: ObservableObject {
         case failed(String)
     }
 
+    enum SavedSortField: String, CaseIterable, Identifiable {
+        case dateAdded
+        case name
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .dateAdded: "Added"
+            case .name: "Name"
+            }
+        }
+    }
+
     private let wikipedia: WikipediaService
     private let factLoader: FactLoader
     private var persistTask: Task<Void, Never>?
@@ -38,6 +52,14 @@ final class OneFactViewModel: ObservableObject {
     @Published var factDetail: FactDetail?
     @Published var isLoadingDetail = false
     @Published var detailFailed = false
+    /// Saved tab: list → opened card (nil = browsing the list).
+    @Published var selectedSavedID: String?
+    @Published var savedFlippedID: String?
+    @Published var savedDetailLoadingID: String?
+    @Published var savedDetailFailedID: String?
+    @Published var savedSearchText = ""
+    @Published var savedSortField: SavedSortField = .dateAdded
+    @Published var savedSortAscending = false
     @Published private(set) var didRestore = false
     private var detailTask: Task<Void, Never>?
     private var detailCache: [String: FactDetail] = [:]
@@ -88,7 +110,45 @@ final class OneFactViewModel: ObservableObject {
         screen = .landing
         currentFact = nil
         loadState = .idle
+        // Drop stale closer-look caches (HTML bloat / truncated extracts from older builds).
+        detailCache.removeAll()
+        selectedSavedID = nil
+        savedFlippedID = nil
+        savedDetailLoadingID = nil
+        savedDetailFailedID = nil
+        savedSearchText = ""
         resetCardFace()
+    }
+
+    /// Saved list after search + sort (name or date added, asc/desc).
+    var filteredSortedSaved: [Fact] {
+        let query = savedSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var items = saved
+        if !query.isEmpty {
+            items = items.filter { fact in
+                fact.title.lowercased().contains(query)
+                    || fact.summary.lowercased().contains(query)
+                    || fact.highlight.lowercased().contains(query)
+            }
+        }
+        items.sort { a, b in
+            let ascending = savedSortAscending
+            switch savedSortField {
+            case .name:
+                let cmp = a.title.localizedCaseInsensitiveCompare(b.title)
+                return ascending ? cmp == .orderedAscending : cmp == .orderedDescending
+            case .dateAdded:
+                let aDate = a.savedAt ?? .distantPast
+                let bDate = b.savedAt ?? .distantPast
+                return ascending ? aDate < bDate : aDate > bDate
+            }
+        }
+        return items
+    }
+
+    var selectedSavedFact: Fact? {
+        guard let selectedSavedID else { return nil }
+        return saved.first { $0.id == selectedSavedID }
     }
 
     private func persistSoon() {
@@ -137,6 +197,32 @@ final class OneFactViewModel: ObservableObject {
 
     func openSaved() {
         screen = .saved
+    }
+
+    func openSavedFact(_ fact: Fact) {
+        selectedSavedID = fact.id
+        savedFlippedID = nil
+        savedDetailFailedID = nil
+    }
+
+    func closeSavedFact() {
+        selectedSavedID = nil
+        savedFlippedID = nil
+        savedDetailLoadingID = nil
+    }
+
+    func toggleSavedSortField(_ field: SavedSortField) {
+        if savedSortField == field {
+            savedSortAscending.toggle()
+        } else {
+            savedSortField = field
+            // Name feels natural A→Z; Added feels natural newest first.
+            savedSortAscending = (field == .name)
+        }
+    }
+
+    func toggleSavedSortDirection() {
+        savedSortAscending.toggle()
     }
 
     func openInterests() {
@@ -362,35 +448,87 @@ final class OneFactViewModel: ObservableObject {
 
     func loadFactDetailIfNeeded() async {
         guard let fact = currentFact else { return }
-        if let cached = detailCache[fact.id] {
-            factDetail = cached
-            detailFailed = false
-            isLoadingDetail = false
+        await loadDetail(for: fact, assignToLearn: true)
+    }
+
+    func toggleSavedCardFlip(_ fact: Fact) {
+        guard selectedSavedID == fact.id else {
+            openSavedFact(fact)
             return
         }
-        if isLoadingDetail { return }
+        let willShowBack = savedFlippedID != fact.id
+        withAnimation(.easeInOut(duration: 0.35)) {
+            savedFlippedID = willShowBack ? fact.id : nil
+        }
+        if willShowBack {
+            Task { await loadDetail(for: fact, assignToLearn: false) }
+        }
+    }
 
-        isLoadingDetail = true
-        detailFailed = false
+    func savedDetail(for id: String) -> FactDetail? {
+        detailCache[id]
+    }
+
+    func isSavedDetailLoading(_ id: String) -> Bool {
+        savedDetailLoadingID == id
+    }
+
+    func didSavedDetailFail(_ id: String) -> Bool {
+        savedDetailFailedID == id && detailCache[id] == nil
+    }
+
+    private func loadDetail(for fact: Fact, assignToLearn: Bool) async {
+        if let cached = detailCache[fact.id] {
+            if assignToLearn {
+                factDetail = cached
+                detailFailed = false
+                isLoadingDetail = false
+            }
+            savedDetailFailedID = nil
+            return
+        }
+
+        if assignToLearn {
+            guard !isLoadingDetail else { return }
+            isLoadingDetail = true
+            detailFailed = false
+        } else {
+            savedDetailLoadingID = fact.id
+            if savedDetailFailedID == fact.id { savedDetailFailedID = nil }
+        }
+
         detailTask?.cancel()
         let lookup = fact.lookupTitle
         let factID = fact.id
         detailTask = Task { @MainActor in
             do {
                 let detail = try await wikipedia.fetchArticleDetail(title: lookup)
-                guard !Task.isCancelled, currentFact?.id == factID else { return }
+                guard !Task.isCancelled else { return }
                 detailCache[factID] = detail
                 if detailCache.count > 40 {
                     detailCache = Dictionary(uniqueKeysWithValues: detailCache.suffix(30))
                 }
-                factDetail = detail
-                detailFailed = false
+                if assignToLearn, currentFact?.id == factID {
+                    factDetail = detail
+                    detailFailed = false
+                }
+                if savedDetailFailedID == factID {
+                    savedDetailFailedID = nil
+                }
             } catch {
-                guard !Task.isCancelled, currentFact?.id == factID else { return }
-                detailFailed = factDetail == nil
+                guard !Task.isCancelled else { return }
+                if assignToLearn, currentFact?.id == factID, factDetail == nil {
+                    detailFailed = true
+                }
+                if !assignToLearn, selectedSavedID == factID || savedFlippedID == factID {
+                    savedDetailFailedID = factID
+                }
             }
-            if currentFact?.id == factID {
+            if assignToLearn, currentFact?.id == factID {
                 isLoadingDetail = false
+            }
+            if savedDetailLoadingID == factID {
+                savedDetailLoadingID = nil
             }
         }
         await detailTask?.value
@@ -432,6 +570,13 @@ final class OneFactViewModel: ObservableObject {
 
     func removeSaved(_ id: String) {
         saved.removeAll { $0.id == id }
+        if selectedSavedID == id {
+            closeSavedFact()
+        }
+        if savedFlippedID == id {
+            savedFlippedID = nil
+        }
+        detailCache.removeValue(forKey: id)
         persistSoon()
         showToast("Removed from saved")
     }

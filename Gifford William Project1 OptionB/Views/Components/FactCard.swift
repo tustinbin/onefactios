@@ -11,20 +11,18 @@ struct FactCard: View {
     var onFlip: (() -> Void)? = nil
 
     var body: some View {
-        ZStack {
-            cardFront
-                .opacity(isFlipped ? 0 : 1)
-                .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
-                .accessibilityHidden(isFlipped)
-                .allowsHitTesting(!isFlipped)
-
-            cardBack
-                .opacity(isFlipped ? 1 : 0)
-                .rotation3DEffect(.degrees(isFlipped ? 0 : -180), axis: (x: 0, y: 1, z: 0))
-                .accessibilityHidden(!isFlipped)
-                .allowsHitTesting(isFlipped)
+        // Only the visible face is in the hierarchy, so height fits that side
+        // (Saved list no longer leaves empty gaps under short fronts).
+        Group {
+            if isFlipped {
+                cardBack
+            } else {
+                cardFront
+            }
         }
-        .animation(.easeInOut(duration: 0.45), value: isFlipped)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .animation(.easeInOut(duration: 0.35), value: isFlipped)
         .onTapGesture {
             onFlip?()
         }
@@ -39,6 +37,7 @@ struct FactCard: View {
                 Text(statusMessage)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
@@ -70,14 +69,21 @@ struct FactCard: View {
                 .font(.system(.title2, design: .serif).weight(.semibold))
                 .foregroundStyle(AppTheme.ink)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if !fact.summary.isEmpty {
-                Text(fact.summary)
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(frontSummaryChunks.enumerated()), id: \.offset) { _, chunk in
+                        Text(chunk)
+                            .font(.system(.body, design: .rounded))
+                            .foregroundStyle(AppTheme.inkSoft)
+                            .multilineTextAlignment(.leading)
+                            .lineSpacing(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
 
             if !fact.highlight.isEmpty {
@@ -85,20 +91,23 @@ struct FactCard: View {
                     .font(.system(.body, design: .rounded).weight(.medium))
                     .foregroundStyle(AppTheme.accent)
                     .multilineTextAlignment(.leading)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(AppTheme.accentSoft)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
-            HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(sourceLine)
                     .font(.caption)
                     .foregroundStyle(AppTheme.muted)
-                Spacer(minLength: 8)
+                    .fixedSize(horizontal: false, vertical: true)
                 Label("Tap for a closer look", systemImage: "arrow.triangle.2.circlepath")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.accent)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -107,19 +116,28 @@ struct FactCard: View {
         .background(AppTheme.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(cardStroke(AppTheme.line))
-        .clipped()
     }
 
     private var cardBack: some View {
         VStack(alignment: .leading, spacing: 0) {
             backHeader
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 Text(fact.title)
-                    .font(.system(.title3, design: .serif).weight(.semibold))
+                    .font(.system(.title2, design: .serif).weight(.semibold))
                     .foregroundStyle(AppTheme.ink)
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let detail, !detail.shortDescription.isEmpty {
+                    Text(detail.shortDescription)
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(AppTheme.muted)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 if isLoadingDetail && detail == nil {
                     HStack(spacing: 10) {
@@ -129,23 +147,15 @@ struct FactCard: View {
                             .font(.system(.body, design: .rounded))
                             .foregroundStyle(AppTheme.muted)
                     }
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 8)
                 } else if let detail {
                     backDetailContent(detail)
                 } else if detailFailed {
-                    Text("Couldn’t load more detail for this page. Use Read more to open Wikipedia.")
+                    Text("Couldn’t load more detail for this page. Use Read more on the bar to open Wikipedia.")
                         .font(.system(.body, design: .rounded))
                         .foregroundStyle(AppTheme.inkSoft)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 4)
                 }
-
-                Text(backFooter)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
@@ -155,19 +165,13 @@ struct FactCard: View {
         .background(AppTheme.accentSoft.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(cardStroke(AppTheme.accent.opacity(0.28)))
-        .clipped()
     }
 
     private var backHeader: some View {
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("A closer look")
-                    .font(.system(.title3, design: .serif).weight(.semibold))
-                    .foregroundStyle(AppTheme.ink)
-                Text("Beyond the short fact")
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.muted)
-            }
+            Text("Read more")
+                .font(.system(.title3, design: .serif).weight(.semibold))
+                .foregroundStyle(AppTheme.ink)
             Spacer(minLength: 8)
             Label("Flip back", systemImage: "arrow.uturn.backward")
                 .font(.caption.weight(.semibold))
@@ -190,56 +194,70 @@ struct FactCard: View {
 
     @ViewBuilder
     private func backDetailContent(_ detail: FactDetail) -> some View {
-        let extraParagraphs = backParagraphs(from: detail)
+        let blocks = backBlocks(from: detail)
 
-        if !detail.shortDescription.isEmpty {
-            Text(detail.shortDescription)
-                .font(.system(.body, design: .rounded).weight(.semibold))
-                .foregroundStyle(AppTheme.accent)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        if !extraParagraphs.isEmpty {
+        if !blocks.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(Array(extraParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                    Text(paragraph)
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(AppTheme.inkSoft)
-                        .multilineTextAlignment(.leading)
-                        .lineSpacing(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    switch block {
+                    case .heading(let title):
+                        Text(title)
+                            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                            .foregroundStyle(AppTheme.accent)
+                            .padding(.top, 6)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    case .body(let text):
+                        Text(text)
+                            .font(.system(.body, design: .rounded))
+                            .foregroundStyle(AppTheme.inkSoft)
+                            .multilineTextAlignment(.leading)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
-            .padding(.top, detail.shortDescription.isEmpty ? 0 : 2)
         } else {
-            Text("No extra paragraphs beyond what you already saw. Categories below may still help — or open Wikipedia for the full article.")
+            Text("Nothing extra beyond the short fact on the front. Open Wikipedia from the bar for the full article.")
                 .font(.system(.body, design: .rounded))
                 .foregroundStyle(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.vertical, 2)
         }
 
         if !detail.categories.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Related categories")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AppTheme.muted)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Related topics")
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.top, 4)
                 CategoryChipWrap(categories: detail.categories)
             }
-            .padding(.top, 4)
         }
+
+        Text(backFooter)
+            .font(.caption)
+            .foregroundStyle(AppTheme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
     }
 
-    /// Back copy with the front summary/highlight removed, split into airy paragraphs.
-    private func backParagraphs(from detail: FactDetail) -> [String] {
-        let stripped = TextUtils.stripFrontOverlap(
+    private var frontSummaryChunks: [String] {
+        TextUtils.readableChunks(from: fact.summary, preferredMaxChars: 220)
+    }
+
+    private var frontPieces: [String] {
+        [fact.summary, fact.highlight].filter { !$0.isEmpty }
+    }
+
+    /// One full closer-look section (prefers Early life / Background), never front copy.
+    private func backBlocks(from detail: FactDetail) -> [TextUtils.ArticleBlock] {
+        TextUtils.closerLookBlocks(
             from: detail.longExtract,
-            frontPieces: [fact.summary, fact.highlight]
+            frontPieces: frontPieces,
+            preferredMaxChars: 280
         )
-        let paragraphs = TextUtils.paragraphs(from: stripped)
-        // Keep the back scannable — don't dump a novel.
-        return Array(paragraphs.prefix(4))
     }
 
     private func cardStroke(_ color: Color) -> some View {
@@ -261,9 +279,9 @@ struct FactCard: View {
     private var backFooter: String {
         switch fact.source {
         case .list:
-            return "In-app detail is from the related article. Read more opens the full Wikipedia list."
+            return "Showing one full section from the related article. Read more opens the Wikipedia list."
         default:
-            return "In-app deeper read. Read more opens the full Wikipedia article."
+            return "One full Wikipedia section (Early life when available). Read more opens the rest."
         }
     }
 }
