@@ -2,19 +2,24 @@ import SwiftUI
 
 struct LandingView: View {
     @ObservedObject var viewModel: OneFactViewModel
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isLandscape: Bool {
+        AppLayout.isLandscapePhone(verticalSizeClass: verticalSizeClass)
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+            VStack(alignment: .leading, spacing: isLandscape ? 18 : 28) {
                 Text("One Fact")
                     .font(.caption.weight(.semibold))
                     .tracking(1.2)
                     .textCase(.uppercase)
                     .foregroundStyle(AppTheme.muted)
 
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: isLandscape ? 8 : 12) {
                     Text("Edify yourself, one fact at a time.")
-                        .font(.system(size: 34, weight: .semibold, design: .serif))
+                        .font(.system(size: isLandscape ? 28 : 34, weight: .semibold, design: .serif))
                         .foregroundStyle(AppTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
 
@@ -24,33 +29,55 @@ struct LandingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                VStack(spacing: 12) {
-                    PrimaryButton(title: "One Fact") {
-                        viewModel.openLearn(loadIfNeeded: true)
-                    }
+                Group {
+                    if isLandscape {
+                        HStack(spacing: 12) {
+                            PrimaryButton(title: "One Fact") {
+                                viewModel.openLearn(loadIfNeeded: true)
+                            }
+                            Button {
+                                viewModel.openChallenge()
+                            } label: {
+                                Text("Challenge")
+                                    .font(.system(.body, design: .rounded).weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(AppTheme.accent)
+                                    .background(AppTheme.accentSoft)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    } else {
+                        VStack(spacing: 12) {
+                            PrimaryButton(title: "One Fact") {
+                                viewModel.openLearn(loadIfNeeded: true)
+                            }
 
-                    Button {
-                        viewModel.openChallenge()
-                    } label: {
-                        Text("Challenge")
-                            .font(.system(.body, design: .rounded).weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundStyle(AppTheme.accent)
-                            .background(AppTheme.accentSoft)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            Button {
+                                viewModel.openChallenge()
+                            } label: {
+                                Text("Challenge")
+                                    .font(.system(.body, design: .rounded).weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .foregroundStyle(AppTheme.accent)
+                                    .background(AppTheme.accentSoft)
+                                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
 
                 howItWorks
 
                 homeStatsFooter
             }
-            .padding(24)
+            .padding(.vertical, isLandscape ? 16 : 24)
             .padding(.bottom, 12)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AppLayout.horizontalPadding(verticalSizeClass: verticalSizeClass))
+            .appContentColumn()
         }
         .background(AppTheme.paperGradient.ignoresSafeArea())
     }

@@ -79,8 +79,7 @@ struct HistoryView: View {
             }
             .padding(20)
             .padding(.bottom, 8)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
     }
 
@@ -113,8 +112,7 @@ struct HistoryView: View {
                 )
             }
             .padding(20)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
         .sheet(isPresented: $viewModel.showHeartSheet) {
             HeartSuggestionsSheet(viewModel: viewModel)

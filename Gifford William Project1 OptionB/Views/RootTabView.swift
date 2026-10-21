@@ -2,6 +2,11 @@ import SwiftUI
 
 struct RootTabView: View {
     @ObservedObject var viewModel: OneFactViewModel
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isLandscape: Bool {
+        AppLayout.isLandscapePhone(verticalSizeClass: verticalSizeClass)
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -32,7 +37,7 @@ struct RootTabView: View {
                     .padding(.vertical, 10)
                     .background(AppTheme.ink.opacity(0.92))
                     .clipShape(Capsule())
-                    .padding(.bottom, 96)
+                    .padding(.bottom, isLandscape ? 52 : 96)
                     .transition(.opacity)
             }
         }
@@ -63,8 +68,8 @@ struct RootTabView: View {
                 viewModel.openInterests()
             }
         }
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.top, isLandscape ? 4 : 10)
+        .padding(.bottom, isLandscape ? 2 : 6)
         .background {
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
                 Rectangle().fill(.clear).glassEffect(.regular, in: .rect)
@@ -86,15 +91,30 @@ struct RootTabView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: systemImage)
-                    .font(.body.weight(.semibold))
-                Text(title)
-                    .font(.caption2.weight(.semibold))
+            Group {
+                if isLandscape {
+                    // Landscape: icon + label side-by-side to save vertical space.
+                    HStack(spacing: 5) {
+                        Image(systemName: systemImage)
+                            .font(.footnote.weight(.semibold))
+                        Text(title)
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 4) {
+                        Image(systemName: systemImage)
+                            .font(.body.weight(.semibold))
+                        Text(title)
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .padding(.vertical, 6)
+                }
             }
             .foregroundStyle(viewModel.screen == screen ? AppTheme.accent : AppTheme.muted)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

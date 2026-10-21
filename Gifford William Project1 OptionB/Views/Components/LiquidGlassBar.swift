@@ -2,13 +2,18 @@ import SwiftUI
 
 /// Sticky bottom chrome with a liquid-glass look. Content scrolls underneath.
 struct LiquidGlassBar<Content: View>: View {
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @ViewBuilder var content: () -> Content
+
+    private var isLandscape: Bool {
+        AppLayout.isLandscapePhone(verticalSizeClass: verticalSizeClass)
+    }
 
     var body: some View {
         content()
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 10)
+            .padding(.horizontal, AppLayout.horizontalPadding(verticalSizeClass: verticalSizeClass))
+            .padding(.top, isLandscape ? 8 : 12)
+            .padding(.bottom, isLandscape ? 6 : 10)
             .frame(maxWidth: .infinity)
             .background { barBackground }
     }

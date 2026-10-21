@@ -68,8 +68,7 @@ private struct SavedFactListView: View {
                 }
                 .padding(20)
                 .padding(.bottom, 8)
-                .frame(maxWidth: 560, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .appContentColumn()
             }
             .scrollDismissesKeyboard(.interactively)
         }
@@ -265,8 +264,7 @@ private struct SavedFactDetailView: View {
             }
             .padding(20)
             .padding(.bottom, 8)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
     }
 

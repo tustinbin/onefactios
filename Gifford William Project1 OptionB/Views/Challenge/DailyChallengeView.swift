@@ -4,6 +4,11 @@ struct DailyChallengeView: View {
     @ObservedObject var viewModel: OneFactViewModel
     /// Smooth bar fill (0…total); eases toward each loaded-fact milestone.
     @State private var animatedLoadProgress: Double = 0
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var isLandscape: Bool {
+        AppLayout.isLandscapePhone(verticalSizeClass: verticalSizeClass)
+    }
 
     var body: some View {
         Group {
@@ -130,8 +135,7 @@ struct DailyChallengeView: View {
             }
             .padding(20)
             .padding(.bottom, 8)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
     }
 
@@ -238,8 +242,7 @@ struct DailyChallengeView: View {
                 }
                 .padding(20)
                 .padding(.bottom, 8)
-                .frame(maxWidth: 560, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .appContentColumn()
             }
 
             LiquidGlassBar {
@@ -304,8 +307,7 @@ struct DailyChallengeView: View {
                         .foregroundStyle(AppTheme.muted)
                     }
                 }
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
+                .appContentColumn()
             }
         }
     }
@@ -357,7 +359,7 @@ struct DailyChallengeView: View {
                         if let imageURL = question.imageURL {
                             Color.clear
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 180)
+                                .frame(height: isLandscape ? 110 : 180)
                                 .overlay {
                                     AsyncImage(url: imageURL) { phase in
                                         switch phase {
@@ -410,8 +412,7 @@ struct DailyChallengeView: View {
                     }
                 }
                 .padding(20)
-                .frame(maxWidth: 560, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .appContentColumn()
             }
 
             LiquidGlassBar {
@@ -422,8 +423,7 @@ struct DailyChallengeView: View {
                     viewModel.submitQuizAnswerAndAdvance()
                 }
                 .opacity(viewModel.quizHasAnsweredCurrent ? 1 : 0.5)
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
+                .appContentColumn()
             }
         }
     }
@@ -566,8 +566,7 @@ struct DailyChallengeView: View {
                 }
             }
             .padding(20)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
     }
 
@@ -613,8 +612,7 @@ struct DailyChallengeView: View {
             }
             .padding(20)
             .padding(.bottom, 8)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
     }
 

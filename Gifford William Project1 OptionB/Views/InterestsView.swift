@@ -39,8 +39,7 @@ struct InterestsView: View {
             }
             .padding(20)
             .padding(.bottom, 8)
-            .frame(maxWidth: 560, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .appContentColumn()
         }
         .scrollDismissesKeyboard(.interactively)
         .background(AppTheme.paperGradient.ignoresSafeArea())
@@ -49,8 +48,7 @@ struct InterestsView: View {
                 PrimaryButton(title: "Learn something new") {
                     viewModel.openLearn(loadIfNeeded: true)
                 }
-                .frame(maxWidth: 560)
-                .frame(maxWidth: .infinity)
+                .appContentColumn()
             }
         }
     }

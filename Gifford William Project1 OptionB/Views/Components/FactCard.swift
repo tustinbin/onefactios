@@ -10,6 +10,12 @@ struct FactCard: View {
     var detailFailed: Bool = false
     var onFlip: (() -> Void)? = nil
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    private var imageHeight: CGFloat {
+        AppLayout.isLandscapePhone(verticalSizeClass: verticalSizeClass) ? 120 : 200
+    }
+
     var body: some View {
         // Only the visible face is in the hierarchy, so height fits that side
         // (Saved list no longer leaves empty gaps under short fronts).
@@ -45,7 +51,7 @@ struct FactCard: View {
                 // Color.clear + overlay keeps scaledToFill from widening the whole card.
                 Color.clear
                     .frame(maxWidth: .infinity)
-                    .frame(height: 200)
+                    .frame(height: imageHeight)
                     .overlay {
                         AsyncImage(url: imageURL) { phase in
                             switch phase {
