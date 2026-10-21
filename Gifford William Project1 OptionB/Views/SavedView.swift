@@ -5,7 +5,9 @@ struct SavedView: View {
 
     var body: some View {
         Group {
-            if let fact = viewModel.selectedSavedFact {
+            if viewModel.showHistory {
+                HistoryView(viewModel: viewModel)
+            } else if let fact = viewModel.selectedSavedFact {
                 SavedFactDetailView(fact: fact, viewModel: viewModel)
             } else {
                 SavedFactListView(viewModel: viewModel)
@@ -74,16 +76,32 @@ private struct SavedFactListView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Saved facts")
-                .font(.system(.title2, design: .serif).weight(.semibold))
-                .foregroundStyle(AppTheme.ink)
-            Text(viewModel.saved.isEmpty
-                 ? "Facts you keep for later."
-                 : "\(viewModel.saved.count) saved — tap a title to open the card.")
-                .font(.system(.subheadline, design: .rounded))
-                .foregroundStyle(AppTheme.inkSoft)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Saved")
+                    .font(.system(.title2, design: .serif).weight(.semibold))
+                    .foregroundStyle(AppTheme.ink)
+                Text(viewModel.saved.isEmpty
+                     ? "Facts you keep for later."
+                     : "\(viewModel.saved.count) saved — tap a title to open the card.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(AppTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Button {
+                viewModel.openHistory()
+            } label: {
+                Label("History", systemImage: "clock.arrow.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AppTheme.accent)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.accentSoft)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Facts you’ve already seen")
         }
     }
 
@@ -268,33 +286,25 @@ private struct SavedFactDetailView: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: 12) {
-            if let url = fact.pageURL {
-                Link(destination: url) {
-                    Text("Read more")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AppTheme.accent)
-                        .padding(.horizontal, 14)
-                        .frame(height: 40)
-                }
-                .background(Capsule().fill(AppTheme.accentSoft))
-            }
-
-            FactShareLink(fact: fact, compact: true)
-                .background(Circle().fill(AppTheme.accentSoft))
-
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 12) {
+            FactActionToolbar(
+                fact: fact,
+                viewModel: viewModel,
+                isFlipped: isFlipped,
+                compact: true
+            )
 
             Button {
                 viewModel.removeSaved(fact.id)
             } label: {
-                Text("Remove")
+                Text("Remove from saved")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AppTheme.danger)
-                    .padding(.horizontal, 12)
-                    .frame(height: 40)
             }
             .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $viewModel.showHeartSheet) {
+            HeartSuggestionsSheet(viewModel: viewModel)
         }
     }
 }

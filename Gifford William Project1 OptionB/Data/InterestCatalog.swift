@@ -645,8 +645,15 @@ enum InterestCatalog {
                 Interest(
                     id: "odd-crime",
                     label: "Crime & intrigue",
-                    keywords: ["assassination", "espionage", "heist", "trial", "scandal", "murder"],
-                    categoryHints: [],
+                    keywords: [
+                        "assassination", "espionage", "heist", "scandal", "murder",
+                        "crime", "criminal", "spy", "spies", "fraud", "theft", "robbery",
+                        "poison", "conspiracy", "intrigue", "kidnap", "blackmail", "forgery"
+                    ],
+                    categoryHints: [
+                        "crime", "criminal", "murder", "espionage", "spies", "scandals",
+                        "theft", "fraud", "trials", "assassinations", "heists"
+                    ],
                     parentID: "odd-history",
                     parentLabel: "Odd history",
                     overview: "Short Wikipedia-backed facts about crime & intrigue.",

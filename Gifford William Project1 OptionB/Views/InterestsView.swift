@@ -27,8 +27,8 @@ struct InterestsView: View {
                 additionSection(
                     title: "Generated Additions",
                     emptyText: viewModel.additions.contains(where: { $0.source == .addition })
-                        ? "All sparkle topics are in use above. Deselect one to park it here."
-                        : "Tap sparkles on Learn for “more like this” topics. They land here when not in use.",
+                        ? "All generated topics are in use above. Deselect one to park it here."
+                        : "Use Find related niches on One Fact for “more like this” topics. They land here when not in use.",
                     interests: viewModel.availableGeneratedAdditions
                 )
 
@@ -70,7 +70,7 @@ struct InterestsView: View {
                     .foregroundStyle(AppTheme.accent)
                 }
             }
-            Text("Put niches in use above. Typed topics park under Custom Additions; sparkle topics under Generated Additions. Delete only from those lists.")
+            Text("Put niches in use above. Typed topics park under Custom Additions; related niches under Generated Additions. Delete only from those lists.")
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)

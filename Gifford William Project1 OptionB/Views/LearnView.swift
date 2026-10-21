@@ -151,13 +151,17 @@ struct LearnView: View {
 
                     if let url = viewModel.currentFact?.pageURL {
                         Link(destination: url) {
-                            Text("Read more")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AppTheme.accent)
-                                .padding(.horizontal, 14)
-                                .frame(height: 44)
+                            Label(
+                                viewModel.isCardFlipped ? "Read full article" : "Read more",
+                                systemImage: "arrow.up.right"
+                            )
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(viewModel.isCardFlipped ? .white : AppTheme.accent)
+                            .padding(.horizontal, viewModel.isCardFlipped ? 16 : 14)
+                            .frame(height: 44)
                         }
-                        .modifier(ReadMoreChrome())
+                        .modifier(ReadMoreChrome(emphasized: viewModel.isCardFlipped))
+                        .animation(.easeInOut(duration: 0.25), value: viewModel.isCardFlipped)
                     }
 
                     Spacer(minLength: 0)
@@ -188,8 +192,14 @@ private struct ShareChrome: ViewModifier {
 }
 
 private struct ReadMoreChrome: ViewModifier {
+    var emphasized: Bool = false
+
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+        if emphasized {
+            content
+                .background(Capsule().fill(AppTheme.accent))
+                .shadow(color: AppTheme.accent.opacity(0.35), radius: 8, y: 2)
+        } else if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
             content
                 .glassEffect(.regular.tint(AppTheme.accentSoft), in: .capsule)
         } else {

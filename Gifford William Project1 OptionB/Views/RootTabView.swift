@@ -18,6 +18,8 @@ struct RootTabView: View {
                     SavedView(viewModel: viewModel)
                 case .interests:
                     InterestsView(viewModel: viewModel)
+                case .challenge:
+                    DailyChallengeView(viewModel: viewModel)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -42,17 +44,20 @@ struct RootTabView: View {
         }
     }
 
-    /// Home · Saved · Learn · Interests
+    /// Home (left) · Saved · One Fact (center) · Challenge · Interests
     private var bottomNav: some View {
         HStack(spacing: 0) {
             navButton("Home", systemImage: "house.fill", screen: .landing) {
                 viewModel.openHome()
             }
-            navButton("Saved", systemImage: "bookmark.fill", screen: .saved) {
+            navButton("Library", systemImage: "bookmark.fill", screen: .saved) {
                 viewModel.openSaved()
             }
-            navButton("Learn", systemImage: "lightbulb.fill", screen: .learn) {
+            navButton("One Fact", systemImage: "lightbulb.fill", screen: .learn) {
                 viewModel.openLearn(loadIfNeeded: true)
+            }
+            navButton("Challenge", systemImage: "flame.fill", screen: .challenge) {
+                viewModel.openChallenge()
             }
             navButton("Interests", systemImage: "square.grid.2x2.fill", screen: .interests) {
                 viewModel.openInterests()

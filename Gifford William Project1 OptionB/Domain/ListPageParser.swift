@@ -122,8 +122,7 @@ enum ListPageParser {
     private static func plainTextFromHTML(_ html: String) -> String {
         var text = TextUtils.stripHTML(html)
         text = TextUtils.decodeHTMLEntities(text)
-        return TextUtils.normalizeWhitespace(text)
-            .replacingOccurrences(of: #"\s+([,.!?;:])"#, with: "$1", options: .regularExpression)
+        return TextUtils.cleanFactPlainText(text)
     }
 
     private static func firstSentence(_ text: String) -> String {
@@ -136,16 +135,50 @@ enum ListPageParser {
         return String(clean.prefix(217)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 
+    /// Hometown / city titles that incident blurbs often link first (“man from Highland, California”).
+    static func isPlaceLikeWikiTitle(_ title: String) -> Bool {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return false }
+        // "Highland, California" / "Paris, France"
+        if t.range(of: #"^[^,]+,\s+.+"#, options: .regularExpression) != nil { return true }
+        if t.range(
+            of: #"\b(County|Township|Municipality|Parish|Borough)\b"#,
+            options: [.regularExpression, .caseInsensitive]
+        ) != nil {
+            return true
+        }
+        return false
+    }
+
+    /// Categories that mark a page as a settlement rather than a ride/person/subject.
+    static func looksLikeSettlement(title: String, categories: [String]) -> Bool {
+        if isPlaceLikeWikiTitle(title) { return true }
+        let blob = categories
+            .map {
+                $0.replacingOccurrences(of: #"^Category:"#, with: "", options: .regularExpression)
+                    .lowercased()
+            }
+            .joined(separator: " ")
+        let signals = [
+            "cities in ", "towns in ", "villages in ", "settlements in ",
+            "municipalities ", "census-designated", "populated places",
+            "counties of ", "cities and towns"
+        ]
+        return signals.contains { blob.contains($0) }
+    }
+
     private static func pickArticleTitle(itemHTML: String, blurb: String) -> String? {
         let blurbLower = blurb.lowercased()
         let candidates = linkCandidates(itemHTML)
-        let ranked: [(title: String, score: Int)] = candidates.compactMap { item in
+        let ranked: [(title: String, score: Int, isPlace: Bool)] = candidates.compactMap { item in
             let title = TextUtils.wikiTitleFromHref(item.href)
             if TextUtils.isSkippableWikiTitle(title) { return nil }
             if title.range(of: #"^List of "#, options: [.regularExpression, .caseInsensitive]) != nil { return nil }
 
             var score = item.priority
             let label = (item.text.isEmpty ? title : item.text).lowercased()
+            let isPlace = isPlaceLikeWikiTitle(title)
+
             if !label.isEmpty {
                 let prefix = String(label.prefix(min(12, label.count)))
                 if blurbLower.hasPrefix(prefix) {
@@ -166,10 +199,40 @@ enum ListPageParser {
                     score -= 6
                 }
             }
-            return (title, score)
+            // Hometown / place links (classic failure: "Highland, California").
+            if isPlace {
+                score -= 8
+                let escaped = NSRegularExpression.escapedPattern(for: label)
+                if !label.isEmpty,
+                   blurbLower.range(
+                    of: #"\bfrom\s+"# + escaped,
+                    options: [.regularExpression, .caseInsensitive]
+                   ) != nil {
+                    score -= 4
+                }
+            } else {
+                // Prefer attractions / titled subjects over bare tangents.
+                if title.range(
+                    of: #"\((?:.*attraction|.*ride|Disneyland|Disney World|film|song)\)"#,
+                    options: [.regularExpression, .caseInsensitive]
+                ) != nil {
+                    score += 3
+                }
+                if wordCount >= 2 { score += 1 }
+            }
+            return (title, score, isPlace)
         }
-        .sorted { $0.score > $1.score }
+        .sorted { a, b in
+            if a.score != b.score { return a.score > b.score }
+            // Tie-break: non-place over place (stops Highland beating Alice in Wonderland).
+            if a.isPlace != b.isPlace { return !a.isPlace }
+            return false
+        }
 
+        // Prefer the best non-place candidate when one exists with a usable score.
+        if let bestSubject = ranked.first(where: { !$0.isPlace && $0.score > 0 }) {
+            return bestSubject.title
+        }
         return ranked.first?.title
     }
 

@@ -9,6 +9,15 @@ final class OneFactViewModel: ObservableObject {
         case learn
         case saved
         case interests
+        case challenge
+    }
+
+    enum ChallengePhase: Equatable {
+        case intro
+        case loading
+        case reading
+        case quiz
+        case results
     }
 
     enum LoadState: Equatable {
@@ -43,6 +52,9 @@ final class OneFactViewModel: ObservableObject {
     @Published var seenIDs: [String] = []
     @Published var saved: [Fact] = []
     @Published var heartedIDs: [String] = []
+    @Published var challengesCompleted = 0
+    /// Recent finished Challenge sessions (newest first) for the intro list.
+    @Published var challengeHistory: [ChallengeSessionRecord] = []
     @Published var expandedParentIDs: Set<String> = []
     @Published var currentFact: Fact?
     @Published var loadState: LoadState = .idle
@@ -64,9 +76,34 @@ final class OneFactViewModel: ObservableObject {
     @Published var isLoadingHeartSuggestions = false
     @Published var heartSuggestions: [Interest] = []
     @Published var selectedHeartSuggestionIDs: Set<String> = []
+    @Published var completedFactIDs: [String] = []
+    @Published var factHistory: [Fact] = []
+    @Published var dailyChallenge: DailyChallengeState?
+    @Published var challengePhase: ChallengePhase = .intro
+    /// Random or Interests — chosen on the Challenge intro screen (independent of Learn).
+    @Published var challengeDeckMode: FactMode = .random
+    @Published var challengeLoadProgress = 0
+    @Published var challengeLoadTotal = DailyChallengeState.deckSize
+    @Published var challengeFlipped = false
+    @Published var challengeDetail: FactDetail?
+    @Published var challengeDetailLoading = false
+    @Published var challengeDetailFailed = false
+    @Published var quizQuestions: [QuizQuestion] = []
+    @Published var quizIndex = 0
+    @Published var quizSelectedOption: Int? = nil
+    @Published var quizAnswers: [String: Int] = [:]
+    @Published var selectedHistoryID: String?
+    @Published var historyFlipped = false
+    /// Saved tab showing History instead of the bookmark list.
+    @Published var showHistory = false
+    /// Session-complete list → opened fact (nil = browsing the list).
+    @Published var selectedChallengeReviewID: String?
     @Published private(set) var didRestore = false
     private var detailTask: Task<Void, Never>?
     private var detailCache: [String: FactDetail] = [:]
+    private var challengeLoadTask: Task<Void, Never>?
+    /// Fact the sparkles sheet is targeting (Learn, Challenge, Saved, or History).
+    private var heartTargetFactID: String?
 
     var selectedInterests: [Interest] {
         selectedIDs.compactMap { id in
@@ -94,11 +131,7 @@ final class OneFactViewModel: ObservableObject {
     }
 
     var homeStatsLabel: String {
-        let nicheCount = selectedIDs.count
-        let nicheBit = nicheCount == 0
-            ? "no niches selected"
-            : "\(nicheCount) niche\(nicheCount == 1 ? "" : "s") selected"
-        return "\(saved.count) saved · \(seenIDs.count) facts seen · \(nicheBit)"
+        "\(seenIDs.count) Facts Seen · \(saved.count) Facts Saved · \(challengesCompleted) Quizzes Taken"
     }
 
     init(wikipedia: WikipediaService = WikipediaService()) {
@@ -118,6 +151,10 @@ final class OneFactViewModel: ObservableObject {
         seenIDs = state.seenIDs
         saved = state.saved
         heartedIDs = state.heartedIDs
+        completedFactIDs = state.completedFactIDs
+        factHistory = state.factHistory
+        challengesCompleted = state.challengesCompleted
+        challengeHistory = state.challengeHistory
         // Default to Random when nothing is selected.
         mode = (state.mode == .interests && !selectedInterests.isEmpty) ? .interests : .random
         // Landing first, like the web app — don't jump back into Learn on launch.
@@ -132,6 +169,7 @@ final class OneFactViewModel: ObservableObject {
         savedDetailFailedID = nil
         savedSearchText = ""
         resetCardFace()
+        restoreDailyChallenge(from: state.dailyChallenge)
     }
 
     /// Saved list after search + sort (name or date added, asc/desc).
@@ -178,12 +216,47 @@ final class OneFactViewModel: ObservableObject {
                 saved: saved,
                 heartedIDs: heartedIDs,
                 completedTopicIDs: [],
-                completedFactIDs: [],
-                factHistory: [],
-                historyIndex: -1
+                completedFactIDs: completedFactIDs,
+                factHistory: factHistory,
+                historyIndex: -1,
+                dailyChallenge: dailyChallenge,
+                challengesCompleted: challengesCompleted,
+                challengeHistory: challengeHistory
             )
             PersistenceStore.save(state)
         }
+    }
+
+    private func restoreDailyChallenge(from saved: DailyChallengeState?) {
+        if let saved, !saved.deck.isEmpty {
+            dailyChallenge = saved
+            // Seed the intro list once if we have a finished session but no history yet.
+            if saved.quizDone, challengeHistory.isEmpty {
+                challengeHistory = [
+                    ChallengeSessionRecord(
+                        id: saved.dayKey,
+                        finishedAt: Date(),
+                        score: saved.quizScore,
+                        total: saved.quizTotal,
+                        mode: challengeDeckMode,
+                        titles: saved.orderedDeck.map(\.title)
+                    )
+                ]
+            }
+        } else {
+            dailyChallenge = nil
+        }
+        challengePhase = .intro
+        challengeFlipped = false
+        challengeDetail = nil
+        challengeDetailLoading = false
+        challengeDetailFailed = false
+        quizIndex = 0
+        quizSelectedOption = nil
+        quizAnswers = [:]
+        selectedHistoryID = nil
+        historyFlipped = false
+        showHistory = false
     }
 
     private func showToast(_ message: String) {
@@ -211,9 +284,27 @@ final class OneFactViewModel: ObservableObject {
 
     func openSaved() {
         screen = .saved
+        showHistory = false
+        selectedHistoryID = nil
+        historyFlipped = false
+    }
+
+    func openHistory() {
+        screen = .saved
+        showHistory = true
+        selectedSavedID = nil
+        selectedHistoryID = nil
+        historyFlipped = false
+    }
+
+    func closeHistory() {
+        showHistory = false
+        selectedHistoryID = nil
+        historyFlipped = false
     }
 
     func openSavedFact(_ fact: Fact) {
+        showHistory = false
         selectedSavedID = fact.id
         savedFlippedID = nil
         savedDetailFailedID = nil
@@ -241,6 +332,23 @@ final class OneFactViewModel: ObservableObject {
 
     func openInterests() {
         screen = .interests
+    }
+
+    func openChallenge() {
+        screen = .challenge
+    }
+
+    var canStartInterestChallenge: Bool {
+        !selectedInterests.isEmpty
+    }
+
+    var hasResumableChallenge: Bool {
+        guard let challenge = dailyChallenge, !challenge.deck.isEmpty else { return false }
+        return !challenge.quizDone
+    }
+
+    var hasChallengeResults: Bool {
+        dailyChallenge?.quizDone == true
     }
 
     // MARK: - Mode & interests
@@ -388,23 +496,25 @@ final class OneFactViewModel: ObservableObject {
 
     private static func makeCustomInterest(id: String, label: String) -> Interest {
         let lower = label.lowercased()
-        let parts = lower
-            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            .map(String.init)
-            .filter { $0.count >= 2 }
-        var keywords = Array(Set([lower] + parts))
-        // Soft expansions for common short brands / plurals
-        if lower.count >= 3, !lower.hasSuffix("s") {
-            keywords.append(lower + "s")
+        let significant = InterestMatching.significantMatchWords(from: label)
+        // Prefer the full phrase; don't let lone words ("star", "wars") match alone.
+        var keywords = [lower]
+        if significant.count == 1, let only = significant.first {
+            keywords.append(only)
+            if only.count >= 3, !only.hasSuffix("s") {
+                keywords.append(only + "s")
+            }
+        } else if significant.count >= 2 {
+            keywords.append(significant.joined(separator: " "))
         }
         return Interest(
             id: id,
             label: label,
-            keywords: keywords,
-            categoryHints: [lower] + parts.filter { $0.count >= 4 },
+            keywords: Array(Set(keywords)),
+            categoryHints: [lower] + (significant.count >= 2 ? [significant.joined(separator: " ")] : significant.filter { $0.count >= 4 }),
             parentID: nil,
             parentLabel: "Custom",
-            overview: "A niche you created. Matching uses “\(label)” as a keyword against Did You Know hooks and Wikipedia categories.",
+            overview: "A niche you created. Multi-word names need all important words to match (e.g. “Star Wars”, not just “star”).",
             purpose: "Steer Learn toward topics that mention \(label).",
             symbolName: "pencil",
             source: .custom
@@ -427,13 +537,15 @@ final class OneFactViewModel: ObservableObject {
             let loaded = try await factLoader.loadFact(
                 interestsMode: effectiveMode == .interests,
                 selectedInterests: selectedInterests,
-                seenIDs: seenIDs
+                seenIDs: seenIDs,
+                recentTitles: factHistory.prefix(12).map(\.title)
             )
             currentFact = loaded.fact
             matchedTopicLabel = loaded.matchedLabel
             if !seenIDs.contains(loaded.fact.id) {
                 seenIDs.append(loaded.fact.id)
             }
+            recordInHistory(loaded.fact)
             loadState = .loaded
             persistSoon()
         } catch let error as FactLoadError {
@@ -566,13 +678,21 @@ final class OneFactViewModel: ObservableObject {
     }
 
     func toggleSaveCurrent() {
-        guard var fact = currentFact else { return }
+        guard let fact = currentFact else { return }
+        toggleSave(fact)
+    }
+
+    func toggleSave(_ fact: Fact) {
         if let index = saved.firstIndex(where: { $0.id == fact.id }) {
             saved.remove(at: index)
+            if selectedSavedID == fact.id {
+                closeSavedFact()
+            }
             showToast("Removed from saved")
         } else {
-            fact.savedAt = Date()
-            saved.insert(fact, at: 0)
+            var copy = fact
+            copy.savedAt = Date()
+            saved.insert(copy, at: 0)
             showToast("Saved")
         }
         persistSoon()
@@ -600,10 +720,15 @@ final class OneFactViewModel: ObservableObject {
         heartedIDs.contains(id)
     }
 
-    /// Opens topic suggestions. Does not mark the fact until topics are actually added.
+    /// Opens topic suggestions for the current Learn fact.
     func heartCurrent() async {
         guard let fact = currentFact else { return }
+        await heartFact(fact)
+    }
 
+    /// Opens topic suggestions for any fact (Challenge, Saved, History, Learn).
+    func heartFact(_ fact: Fact) async {
+        heartTargetFactID = fact.id
         selectedHeartSuggestionIDs = []
         heartSuggestions = []
         isLoadingHeartSuggestions = true
@@ -671,6 +796,7 @@ final class OneFactViewModel: ObservableObject {
         heartSuggestions = []
         selectedHeartSuggestionIDs = []
         isLoadingHeartSuggestions = false
+        heartTargetFactID = nil
     }
 
     @discardableResult
@@ -695,14 +821,500 @@ final class OneFactViewModel: ObservableObject {
         }
         // Mark only after the user confirms with at least one topic selected.
         // (Not now leaves the sparkles button inactive.)
-        if let factID = currentFact?.id, !heartedIDs.contains(factID) {
+        let factID = heartTargetFactID ?? currentFact?.id
+        if let factID, !heartedIDs.contains(factID) {
             heartedIDs.append(factID)
         }
         persistSoon()
         return changed
     }
 
+    /// Niche label for a Challenge card when the session used Interests.
+    func challengeTopicLabel(for fact: Fact) -> String? {
+        guard challengeDeckMode == .interests else { return nil }
+        for id in fact.matchedNicheIDs {
+            if let interest = selectedInterests.first(where: { $0.id == id }) {
+                return interest.label
+            }
+            if let leaf = InterestCatalog.leaf(id: id) ?? additions.first(where: { $0.id == id }) {
+                return leaf.label
+            }
+        }
+        return "Your interests"
+    }
+
     var shareText: String {
         currentFact?.shareText ?? ""
+    }
+
+    // MARK: - Challenge
+
+    var challengeFact: Fact? {
+        dailyChallenge?.currentFact
+    }
+
+    func isFactCompleted(_ id: String) -> Bool {
+        completedFactIDs.contains(id)
+    }
+
+    func toggleFactCompleted(_ id: String) {
+        if let index = completedFactIDs.firstIndex(of: id) {
+            completedFactIDs.remove(at: index)
+            showToast("Marked incomplete")
+        } else {
+            completedFactIDs.append(id)
+            showToast("Marked complete")
+        }
+        persistSoon()
+    }
+
+    func startNewChallenge() {
+        if challengeDeckMode == .interests, !canStartInterestChallenge {
+            showToast("Select niches in Interests first")
+            return
+        }
+        challengeLoadTask?.cancel()
+        challengeLoadTask = Task { await loadChallengeDeck() }
+    }
+
+    func resumeChallenge() {
+        guard let existing = dailyChallenge, !existing.deck.isEmpty else {
+            startNewChallenge()
+            return
+        }
+        if existing.quizDone {
+            challengePhase = .results
+        } else {
+            challengePhase = .reading
+            resetChallengeCardFace()
+        }
+    }
+
+    func viewChallengeResults() {
+        guard hasChallengeResults else { return }
+        challengePhase = .results
+    }
+
+    func challengeGoPrevious() {
+        guard var challenge = dailyChallenge, challenge.index > 0 else { return }
+        challenge.index -= 1
+        dailyChallenge = challenge
+        resetChallengeCardFace()
+        persistSoon()
+    }
+
+    func challengeGoNext() {
+        guard var challenge = dailyChallenge else { return }
+        let last = max(challenge.orderedDeck.count - 1, 0)
+        if challenge.index < last {
+            challenge.index += 1
+            dailyChallenge = challenge
+            resetChallengeCardFace()
+            persistSoon()
+        } else {
+            beginChallengeQuiz()
+        }
+    }
+
+    func beginChallengeQuiz() {
+        guard let challenge = dailyChallenge else { return }
+        let questions = QuizBuilder.makeSessionQuestions(
+            deck: challenge.deck,
+            decoyTitles: challenge.decoyTitles
+        )
+        quizQuestions = questions
+        quizIndex = 0
+        quizSelectedOption = nil
+        quizAnswers = [:]
+        if questions.isEmpty {
+            // Still complete the session if we can't build any quiz questions yet.
+            completeChallengeWithoutQuiz()
+            return
+        }
+        challengePhase = .quiz
+    }
+
+    private func completeChallengeWithoutQuiz() {
+        let wasAlreadyDone = dailyChallenge?.quizDone == true
+        if var challenge = dailyChallenge {
+            challenge.quizDone = true
+            challenge.quizScore = 0
+            challenge.quizTotal = 0
+            dailyChallenge = challenge
+        }
+        if !wasAlreadyDone {
+            challengesCompleted += 1
+            recordFinishedChallengeSession(score: 0, total: 0)
+        }
+        selectedChallengeReviewID = nil
+        challengePhase = .results
+        persistSoon()
+        showToast("Session complete")
+    }
+
+    func selectQuizOption(_ optionIndex: Int) {
+        guard quizQuestions.indices.contains(quizIndex) else { return }
+        // Lock in the first answer so feedback stays visible until Next.
+        guard quizSelectedOption == nil else { return }
+        quizSelectedOption = optionIndex
+        let question = quizQuestions[quizIndex]
+        quizAnswers[question.id] = optionIndex
+    }
+
+    var quizHasAnsweredCurrent: Bool {
+        quizSelectedOption != nil
+    }
+
+    func submitQuizAnswerAndAdvance() {
+        guard quizSelectedOption != nil else {
+            showToast("Pick an answer first")
+            return
+        }
+        if quizIndex + 1 < quizQuestions.count {
+            quizIndex += 1
+            quizSelectedOption = nil
+        } else {
+            finishChallengeQuiz()
+        }
+    }
+
+    private func finishChallengeQuiz() {
+        var score = 0
+        for question in quizQuestions {
+            if quizAnswers[question.id] == question.correctIndex {
+                score += 1
+            }
+        }
+        let wasAlreadyDone = dailyChallenge?.quizDone == true
+        if var challenge = dailyChallenge {
+            challenge.quizDone = true
+            challenge.quizScore = score
+            challenge.quizTotal = quizQuestions.count
+            dailyChallenge = challenge
+        }
+        // Count each finished quiz once (retakes after reset still count as new completions).
+        if !wasAlreadyDone {
+            challengesCompleted += 1
+            recordFinishedChallengeSession(score: score, total: quizQuestions.count)
+        }
+        selectedChallengeReviewID = nil
+        challengePhase = .results
+        persistSoon()
+        let perfect = !quizQuestions.isEmpty && score == quizQuestions.count
+        showToast(perfect ? "Perfect score!" : "Quiz complete")
+        // Play after the results transition so audio never races the view update.
+        if perfect {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                CelebrationSound.playPerfectQuiz()
+            }
+        }
+    }
+
+    private func recordFinishedChallengeSession(score: Int, total: Int) {
+        guard let challenge = dailyChallenge else { return }
+        let record = ChallengeSessionRecord(
+            id: challenge.dayKey,
+            finishedAt: Date(),
+            score: score,
+            total: total,
+            mode: challengeDeckMode,
+            titles: challenge.orderedDeck.map(\.title)
+        )
+        challengeHistory.removeAll { $0.id == record.id }
+        challengeHistory.insert(record, at: 0)
+        if challengeHistory.count > 20 {
+            challengeHistory = Array(challengeHistory.prefix(20))
+        }
+    }
+
+    func retakeChallengeQuiz() {
+        guard let challenge = dailyChallenge else { return }
+        let questions = QuizBuilder.makeSessionQuestions(
+            deck: challenge.deck,
+            decoyTitles: challenge.decoyTitles
+        )
+        quizQuestions = questions
+        quizIndex = 0
+        quizSelectedOption = nil
+        quizAnswers = [:]
+        selectedChallengeReviewID = nil
+        if questions.isEmpty {
+            showToast("Need a bit more history for a recall check")
+            return
+        }
+        if var updated = dailyChallenge {
+            updated.quizDone = false
+            updated.quizScore = 0
+            dailyChallenge = updated
+        }
+        challengePhase = .quiz
+        persistSoon()
+    }
+
+    func reviewChallengeDeck() {
+        selectedChallengeReviewID = nil
+        guard var challenge = dailyChallenge, !challenge.deck.isEmpty else { return }
+        challenge.index = 0
+        dailyChallenge = challenge
+        challengePhase = .reading
+        resetChallengeCardFace()
+        persistSoon()
+    }
+
+    var selectedChallengeReviewFact: Fact? {
+        guard let selectedChallengeReviewID else { return nil }
+        return dailyChallenge?.orderedDeck.first { $0.id == selectedChallengeReviewID }
+            ?? dailyChallenge?.deck.first { $0.id == selectedChallengeReviewID }
+    }
+
+    func openChallengeReviewFact(_ fact: Fact) {
+        selectedChallengeReviewID = fact.id
+        challengeFlipped = false
+        challengeDetail = detailCache[fact.id]
+        challengeDetailLoading = false
+        challengeDetailFailed = false
+    }
+
+    func closeChallengeReviewFact() {
+        selectedChallengeReviewID = nil
+        challengeFlipped = false
+        challengeDetail = nil
+        challengeDetailLoading = false
+        challengeDetailFailed = false
+    }
+
+    func toggleChallengeReviewCardFlip() {
+        guard let fact = selectedChallengeReviewFact else { return }
+        let willShowBack = !challengeFlipped
+        withAnimation(.easeInOut(duration: 0.35)) {
+            challengeFlipped = willShowBack
+        }
+        if willShowBack {
+            Task { await loadChallengeDetail(for: fact) }
+        }
+    }
+
+    func openHistoryFact(_ fact: Fact) {
+        selectedHistoryID = fact.id
+        historyFlipped = false
+    }
+
+    func closeHistoryFact() {
+        selectedHistoryID = nil
+        historyFlipped = false
+    }
+
+    func toggleHistoryCardFlip() {
+        guard let id = selectedHistoryID,
+              let fact = factHistory.first(where: { $0.id == id }) else { return }
+        let willShowBack = !historyFlipped
+        withAnimation(.easeInOut(duration: 0.35)) {
+            historyFlipped = willShowBack
+        }
+        if willShowBack {
+            Task { await loadDetail(for: fact, assignToLearn: false) }
+        }
+    }
+
+    var selectedHistoryFact: Fact? {
+        guard let selectedHistoryID else { return nil }
+        return factHistory.first { $0.id == selectedHistoryID }
+    }
+
+    func toggleChallengeCardFlip() {
+        guard let fact = challengeFact else { return }
+        let willShowBack = !challengeFlipped
+        withAnimation(.easeInOut(duration: 0.45)) {
+            challengeFlipped = willShowBack
+        }
+        if willShowBack {
+            Task { await loadChallengeDetail(for: fact) }
+        }
+    }
+
+    private func loadChallengeDetail(for fact: Fact) async {
+        if let cached = detailCache[fact.id] {
+            challengeDetail = cached
+            challengeDetailFailed = false
+            challengeDetailLoading = false
+            return
+        }
+        challengeDetailLoading = true
+        challengeDetailFailed = false
+        do {
+            let detail = try await wikipedia.fetchArticleDetail(title: fact.lookupTitle)
+            detailCache[fact.id] = detail
+            if isShowingChallengeFact(fact.id) {
+                challengeDetail = detail
+                challengeDetailFailed = false
+            }
+        } catch {
+            if isShowingChallengeFact(fact.id), challengeDetail == nil {
+                challengeDetailFailed = true
+            }
+        }
+        if isShowingChallengeFact(fact.id) {
+            challengeDetailLoading = false
+        }
+    }
+
+    private func isShowingChallengeFact(_ id: String) -> Bool {
+        challengeFact?.id == id || selectedChallengeReviewID == id
+    }
+
+    private func resetChallengeCardFace() {
+        challengeFlipped = false
+        challengeDetail = nil
+        challengeDetailLoading = false
+        challengeDetailFailed = false
+        if let fact = challengeFact, let cached = detailCache[fact.id] {
+            challengeDetail = cached
+        }
+    }
+
+    private func recordInHistory(_ fact: Fact) {
+        factHistory.removeAll { $0.id == fact.id }
+        factHistory.insert(fact, at: 0)
+        if factHistory.count > 80 {
+            factHistory = Array(factHistory.prefix(80))
+        }
+    }
+
+    private func loadChallengeDeck() async {
+        let useInterests = challengeDeckMode == .interests && canStartInterestChallenge
+        challengePhase = .loading
+        // UI always shows 5 — the extra Wikipedia pulls for decoys stay invisible.
+        challengeLoadProgress = 0
+        challengeLoadTotal = DailyChallengeState.deckSize
+
+        var pool: [Fact] = []
+        var localSeen = Set(seenIDs)
+        var failures = 0
+        let poolTarget = DailyChallengeState.fetchPoolSize
+
+        while pool.count < poolTarget, failures < 14 {
+            if Task.isCancelled { return }
+            do {
+                let loaded = try await factLoader.loadFact(
+                    interestsMode: useInterests,
+                    selectedInterests: useInterests ? selectedInterests : [],
+                    seenIDs: Array(localSeen),
+                    recentTitles: pool.map(\.title) + factHistory.prefix(8).map(\.title)
+                )
+                localSeen.insert(loaded.fact.id)
+                // Quietly skip Wikipedia list-page facts in Challenge.
+                if loaded.fact.source == .list {
+                    failures += 1
+                    continue
+                }
+                if pool.contains(where: { $0.id == loaded.fact.id }) {
+                    failures += 1
+                    continue
+                }
+                let title = loaded.fact.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else {
+                    failures += 1
+                    continue
+                }
+                pool.append(loaded.fact)
+                // Map silent pool progress onto a 1…5 display.
+                challengeLoadProgress = min(
+                    DailyChallengeState.deckSize,
+                    max(1, Int(round(Double(pool.count) / Double(poolTarget) * Double(DailyChallengeState.deckSize))))
+                )
+                failures = 0
+            } catch {
+                failures += 1
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+
+        let built = Self.buildChallengeDeckAndDecoys(from: pool)
+        guard built.deck.count >= 3 else {
+            challengePhase = .intro
+            showToast(
+                useInterests
+                    ? "Not enough interest matches — try Random or add niches"
+                    : "Couldn’t load enough facts — try again"
+            )
+            return
+        }
+
+        challengeLoadProgress = DailyChallengeState.deckSize
+
+        for fact in built.deck {
+            if !seenIDs.contains(fact.id) {
+                seenIDs.append(fact.id)
+            }
+            recordInHistory(fact)
+        }
+
+        let sessionKey = DailyChallengeState.dayKey() + "-\(Int(Date().timeIntervalSince1970))"
+        dailyChallenge = DailyChallengeState.fresh(
+            dayKey: sessionKey,
+            deck: built.deck,
+            decoyTitles: built.decoyTitles
+        )
+        challengePhase = .reading
+        resetChallengeCardFace()
+        persistSoon()
+        showToast(useInterests ? "Interest deck ready" : "Random deck ready")
+    }
+
+    /// Split a fetched pool into a 5-card reading deck + unused titles for quiz wrong answers.
+    /// Very short blurbs become decoys; prefer including at least one imaged fact in the deck.
+    private static func buildChallengeDeckAndDecoys(from pool: [Fact]) -> (deck: [Fact], decoyTitles: [String]) {
+        let target = DailyChallengeState.deckSize
+        var shortPool: [Fact] = []
+        var solidPool: [Fact] = []
+        for fact in pool {
+            if isChallengeDecoyOnly(fact) {
+                shortPool.append(fact)
+            } else {
+                solidPool.append(fact)
+            }
+        }
+
+        var deck: [Fact] = []
+        // Prefer a solid fact with an image so the image→title question can run.
+        if let imaged = TextUtils.shuffle(solidPool.filter { $0.imageURL != nil }).first {
+            deck.append(imaged)
+        }
+
+        let remainingSolid = TextUtils.shuffle(solidPool.filter { fact in
+            !deck.contains(where: { $0.id == fact.id })
+        })
+        for fact in remainingSolid where deck.count < target {
+            deck.append(fact)
+        }
+
+        // Never promote ultra-short cards into the reading deck — they stay decoys only.
+        // If we somehow lack 5 solid facts, keep a smaller deck rather than quiz on stubs.
+
+        let deckIDs = Set(deck.map(\.id))
+        var decoyTitles: [String] = []
+        var decoySeen = Set(deck.map { $0.title.lowercased() })
+        // Short leftovers first (they were pulled to be wrong answers).
+        for fact in shortPool + solidPool {
+            guard !deckIDs.contains(fact.id) else { continue }
+            let title = fact.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = title.lowercased()
+            guard !title.isEmpty, decoySeen.insert(key).inserted else { continue }
+            decoyTitles.append(title)
+        }
+
+        return (deck, decoyTitles)
+    }
+
+    /// Super-short cards (≤2 sentences) are decoy-only — not quizzed as the “correct” subject.
+    private static func isChallengeDecoyOnly(_ fact: Fact) -> Bool {
+        let body = [fact.summary, fact.highlight]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let sentences = TextUtils.sentenceCount(in: body)
+        return sentences > 0 && sentences <= DailyChallengeState.maxDecoySentenceCount
     }
 }

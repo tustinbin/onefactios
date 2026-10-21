@@ -267,6 +267,13 @@ enum TextUtils {
         return titled == words.count && words.count >= 1 && words.count <= 6
     }
 
+    /// How many sentence-like units are in the text (for quiz deck quality gates).
+    static func sentenceCount(in text: String) -> Int {
+        let trimmed = normalizeWhitespace(text)
+        guard !trimmed.isEmpty else { return 0 }
+        return splitSentences(trimmed).count
+    }
+
     private static func splitSentences(_ text: String) -> [String] {
         var sentences: [String] = []
         var current = ""
@@ -454,6 +461,13 @@ enum TextUtils {
             if next == text { break }
             text = next
         }
+        // Drop file/image embeds before pipe-link rewrite — otherwise
+        // [[File:X.jpg|thumb|alt=Foo|caption]] becomes "thumb|alt=Foo|caption".
+        text = text.replacingOccurrences(
+            of: #"\[\[(?:File|Image|Media):[^\]]*\]\]"#,
+            with: " ",
+            options: [.regularExpression, .caseInsensitive]
+        )
         // [[Link|Label]] -> Label, [[Link]] -> Link
         text = text.replacingOccurrences(
             of: #"\[\[([^|\]]+)\|([^\]]+)\]\]"#,
@@ -482,11 +496,46 @@ enum TextUtils {
         return cleanCloserLookText(text)
     }
 
+    /// Strip wiki citation markers and tidy spacing for card / list blurbs.
+    static func cleanFactPlainText(_ raw: String) -> String {
+        var text = normalizeWhitespace(raw)
+        text = text.replacingOccurrences(of: #"\[\s*\d+\s*\]"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(
+            of: #"\[\s*(?:citation needed|clarification needed|note\s*\d*)[^\]]*\]"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        text = text.replacingOccurrences(of: #"\s+([,.!?;:])"#, with: "$1", options: .regularExpression)
+        return normalizeWhitespace(text)
+    }
+
     /// Strip citation markers, hatnotes, and leftover wiki noise from closer-look text.
     static func cleanCloserLookText(_ raw: String) -> String {
         var text = raw
         text = text.replacingOccurrences(of: #"\[\s*\d+\s*\]"#, with: "", options: .regularExpression)
-        text = text.replacingOccurrences(of: #"\[\s*(?:citation needed|clarification needed)[^\]]*\]"#, with: "", options: [.regularExpression, .caseInsensitive])
+        text = text.replacingOccurrences(
+            of: #"\[\s*(?:citation needed|clarification needed|note\s*\d*)[^\]]*\]"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        // Leftover image-option crumbs from failed File: rewrites.
+        text = text.replacingOccurrences(
+            of: #"(?i)\|?\b(?:thumb|thumbnail|frameless|frame|upright(?:=[\d.]+)?|right|left|center|baseline|border)\b"#,
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?i)\|?alt\s*=\s*[^|\n\]]*"#,
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(
+            of: #"(?i)\b(?:File|Image|Media):[^\s|\]\n]+"#,
+            with: " ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(of: #"[|]{2,}"#, with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"\s+\|\s+"#, with: " ", options: .regularExpression)
         // Drop common hatnote / maintenance lines.
         let lines = text.components(separatedBy: .newlines).filter { line in
             let t = line.trimmingCharacters(in: .whitespacesAndNewlines)

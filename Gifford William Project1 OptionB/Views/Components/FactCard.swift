@@ -169,7 +169,7 @@ struct FactCard: View {
 
     private var backHeader: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text("Read more")
+            Text("A closer look")
                 .font(.system(.title3, design: .serif).weight(.semibold))
                 .foregroundStyle(AppTheme.ink)
             Spacer(minLength: 8)
@@ -219,20 +219,10 @@ struct FactCard: View {
                 }
             }
         } else {
-            Text("Nothing extra beyond the short fact on the front. Open Wikipedia from the bar for the full article.")
+            Text("Nothing extra beyond the short fact on the front. Open Wikipedia from Read more on the bar.")
                 .font(.system(.body, design: .rounded))
                 .foregroundStyle(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-
-        if !detail.categories.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Related topics")
-                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                    .padding(.top, 4)
-                CategoryChipWrap(categories: detail.categories)
-            }
         }
 
         Text(backFooter)
@@ -282,71 +272,6 @@ struct FactCard: View {
             return "Showing one full section from the related article. Read more opens the Wikipedia list."
         default:
             return "One full Wikipedia section (Early life when available). Read more opens the rest."
-        }
-    }
-}
-
-private struct CategoryChipWrap: View {
-    let categories: [String]
-
-    var body: some View {
-        ChipFlowLayout(spacing: 8) {
-            ForEach(categories, id: \.self) { category in
-                Text(category)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(AppTheme.surface.opacity(0.92))
-                    .clipShape(Capsule())
-            }
-        }
-    }
-}
-
-private struct ChipFlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? .infinity
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var height: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > maxWidth, x > 0 {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            rowHeight = max(rowHeight, size.height)
-            height = max(height, y + size.height)
-            x += size.width + spacing
-        }
-        return CGSize(width: maxWidth.isFinite ? maxWidth : x, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > bounds.maxX, x > bounds.minX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            subview.place(
-                at: CGPoint(x: x, y: y),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(size)
-            )
-            rowHeight = max(rowHeight, size.height)
-            x += size.width + spacing
         }
     }
 }

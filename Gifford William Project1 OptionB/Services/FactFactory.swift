@@ -42,26 +42,44 @@ enum FactFactory {
 
     // MARK: - List entry
 
-    /// List-sourced facts always "Read more" to the **list page**, not a tangential
-    /// blurb link (e.g. Autopsy). Image comes from the list page summary only —
-    /// never from a linked side article — so we don't show misleading thumbnails.
+    /// List-sourced facts are **list entries**, not the tangential blurb link.
+    /// Title/body come from the list item; Read more + image stay on the list page.
+    /// `articleSummary` is optional enrichment only when the linked page is a real subject
+    /// (not a hometown city) — pass `nil` otherwise.
     static func makeFact(
         from entry: ListEntry,
         listPageSummary: WikipediaSummaryDTO?,
+        articleSummary: WikipediaSummaryDTO?,
         matchedNicheIDs: [String]
     ) -> Fact {
         let title = displayTitleForListEntry(entry)
-        let summaryText = formatSummary(entry.blurb).isEmpty ? entry.blurb : formatSummary(entry.blurb)
+        let cleanedBlurb = formatSummary(entry.blurb)
+        let articleExtract = formatSummary(articleSummary?.extract ?? "")
+
+        // List blurb is the fact. Article extract only fills in if the blurb is too thin
+        // and we were given a verified subject article.
+        let summaryText: String
+        if cleanedBlurb.count >= 40 {
+            summaryText = cleanedBlurb
+        } else if articleExtract.count >= 80 {
+            summaryText = articleExtract
+        } else {
+            summaryText = cleanedBlurb.isEmpty ? articleExtract : cleanedBlurb
+        }
+
         let imageString = listPageSummary?.thumbnail?.source ?? listPageSummary?.originalimage?.source
         let listWikiPath = entry.listTitle.replacingOccurrences(of: " ", with: "_")
         let pageString = listPageSummary?.content_urls?.desktop?.page
             ?? listPageSummary?.content_urls?.mobile?.page
             ?? "https://en.wikipedia.org/wiki/\(listWikiPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? listWikiPath)"
 
+        // Closer-look: subject article when we have one; otherwise the list page itself.
+        let lookupTitle = articleSummary != nil ? entry.articleTitle : entry.listTitle
+
         return Fact(
             id: entry.id,
             title: title,
-            lookupTitle: entry.articleTitle,
+            lookupTitle: lookupTitle,
             summary: summaryText,
             highlight: "",
             imageURL: imageString.flatMap(URL.init(string:)),
@@ -105,7 +123,7 @@ enum FactFactory {
     }
 
     static func formatSummary(_ extract: String) -> String {
-        TextUtils.normalizeWhitespace(extract)
+        TextUtils.cleanFactPlainText(extract)
     }
 
     static func isHighlightRedundant(summary: String, highlight: String) -> Bool {
@@ -213,6 +231,11 @@ enum FactFactory {
             symbolName: "sparkles",
             source: .addition
         )
+    }
+
+    /// Public so loaders can de-dupe / safety-check before building the Fact.
+    static func listEntryDisplayTitle(_ entry: ListEntry) -> String {
+        displayTitleForListEntry(entry)
     }
 
     private static func displayTitleForListEntry(_ entry: ListEntry) -> String {
