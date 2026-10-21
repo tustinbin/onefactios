@@ -124,19 +124,93 @@ enum FactFactory {
         let label = name.replacingOccurrences(of: #"^Category:"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard isUsableCategory(label) else { return nil }
+        return makeAdditionInterest(label: label)
+    }
+
+    /// Broader heart suggestions: catalog matches + generalized Wikipedia categories.
+    static func heartSuggestions(categories: [String], fact: Fact, limit: Int = 8) -> [Interest] {
+        var results: [Interest] = []
+        var seen = Set<String>()
+
+        func append(_ interest: Interest) {
+            let key = interest.id
+            guard seen.insert(key).inserted else { return }
+            results.append(interest)
+        }
+
+        // 1) Existing catalog niches that clearly relate to this fact.
+        let haystack = "\(fact.title) \(fact.summary) \(fact.highlight) \(categories.joined(separator: " "))"
+            .lowercased()
+        let catalogHits = InterestCatalog.leaves.compactMap { leaf -> (Interest, Int)? in
+            var score = 0
+            for keyword in InterestMatching.interestKeywords(leaf) {
+                let strength = InterestMatching.keywordStrength(keyword, allowShortBrands: false)
+                if strength > 0, InterestMatching.keywordHits(haystack: haystack, keyword: keyword) {
+                    score = max(score, strength)
+                }
+            }
+            return score > 0 ? (leaf, score) : nil
+        }
+        .sorted { $0.1 > $1.1 }
+        for (leaf, _) in catalogHits.prefix(4) {
+            append(leaf)
+        }
+
+        // 2) Broadened Wikipedia categories (not hyper-specific leaves).
+        for raw in categories {
+            guard let broad = broadenCategoryLabel(raw) else { continue }
+            // Prefer an existing catalog leaf with the same label when possible.
+            if let existing = InterestCatalog.leaves.first(where: {
+                $0.label.compare(broad, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }) {
+                append(existing)
+            } else {
+                append(makeAdditionInterest(label: broad))
+            }
+            if results.count >= limit { break }
+        }
+
+        return Array(results.prefix(limit))
+    }
+
+    /// Collapse overly specific Wiki categories into something matchable.
+    static func broadenCategoryLabel(_ raw: String) -> String? {
+        var label = raw.replacingOccurrences(of: #"^Category:"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isUsableCategory(label) else { return nil }
+
+        // Drop trailing geography / date-heavy tails: "X in France", "X of the 19th century"
+        label = label.replacingOccurrences(
+            of: #"\s+(in|of|from|by|for)\s+.+$"#,
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var words = label.split(separator: " ").map(String.init)
+        // Keep at most 3 content words so niches stay broad enough to match DYK.
+        if words.count > 3 {
+            words = Array(words.suffix(3))
+            label = words.joined(separator: " ")
+        }
+        guard isBroadEnoughCategory(label) else { return nil }
+        return label
+    }
+
+    private static func makeAdditionInterest(label: String) -> Interest {
         let lower = label.lowercased()
         let parts = lower.split(separator: " ").map(String.init).filter { $0.count > 2 }
         let slug = TextUtils.slugify(label)
         return Interest(
             id: "add-\(slug)",
             label: label,
-            keywords: [lower] + parts,
-            categoryHints: [lower],
+            keywords: Array(Set([lower] + parts)),
+            categoryHints: [lower] + parts.filter { $0.count >= 4 },
             parentID: nil,
-            parentLabel: nil,
-            overview: "A topic you added by hearting a related Wikipedia article.",
-            purpose: "Steer future facts toward subjects you already liked.",
-            symbolName: "plus.circle",
+            parentLabel: "More like this",
+            overview: "A broader topic suggested from an article you liked.",
+            purpose: "Steer Learn toward related Did You Know facts.",
+            symbolName: "sparkles",
             source: .addition
         )
     }
@@ -166,16 +240,27 @@ enum FactFactory {
     }
 
     private static func isUsableCategory(_ cleaned: String) -> Bool {
-        guard cleaned.count >= 3, cleaned.count <= 48 else { return false }
+        guard cleaned.count >= 3, cleaned.count <= 56 else { return false }
         if cleaned.range(of: #"^\d{4}"#, options: .regularExpression) != nil { return false }
+        if cleaned.range(of: #"\b(19|20)\d{2}\b"#, options: .regularExpression) != nil { return false }
         let blocked = [
             "Articles ", "Pages ", "All ", "Wikipedia ", "CS1 ", "Use ", "Webarchive",
-            "Redirects ", "Disambiguation", "Living people", "Births ", "Deaths "
+            "Redirects ", "Disambiguation", "Living people", "Births ", "Deaths ",
+            "People from ", "Alumni of ", "Members of "
         ]
         if blocked.contains(where: { cleaned.hasPrefix($0) }) { return false }
         if cleaned.range(of: #"\b(stubs?|templates?|categories|maintenance|wikidata|infobox)\b"#, options: [.regularExpression, .caseInsensitive]) != nil {
             return false
         }
+        return true
+    }
+
+    private static func isBroadEnoughCategory(_ cleaned: String) -> Bool {
+        guard isUsableCategory(cleaned) else { return false }
+        let words = cleaned.split(separator: " ")
+        guard words.count >= 1, words.count <= 3 else { return false }
+        // Single very short tokens are too vague / noisy for matching.
+        if words.count == 1, cleaned.count < 4 { return false }
         return true
     }
 

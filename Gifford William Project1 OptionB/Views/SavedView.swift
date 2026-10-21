@@ -280,13 +280,8 @@ private struct SavedFactDetailView: View {
                 .background(Capsule().fill(AppTheme.accentSoft))
             }
 
-            ShareLink(item: fact.shareText) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(AppTheme.inkSoft)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(AppTheme.accentSoft))
-            }
+            FactShareLink(fact: fact, compact: true)
+                .background(Circle().fill(AppTheme.accentSoft))
 
             Spacer(minLength: 0)
 

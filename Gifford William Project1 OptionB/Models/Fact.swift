@@ -23,10 +23,21 @@ struct Fact: Identifiable, Codable, Equatable, Hashable {
 
     var shareText: String {
         var parts = [title]
-        if !summary.isEmpty { parts.append("\n\(summary)") }
-        if !highlight.isEmpty { parts.append("\n\(highlight)") }
-        if let pageURL { parts.append("\n\(pageURL.absoluteString)") }
-        return parts.joined(separator: "\n")
+        if !shareBlurb.isEmpty { parts.append(shareBlurb) }
+        if let pageURL { parts.append(pageURL.absoluteString) }
+        return parts.joined(separator: "\n\n")
+    }
+
+    /// Short blurb for Messages / Mail (keeps the share sheet useful, not a wall of text).
+    var shareBlurb: String {
+        let raw = highlight.isEmpty ? summary : highlight
+        let trimmed = TextUtils.normalizeWhitespace(raw)
+        guard trimmed.count > 220 else { return trimmed }
+        return String(trimmed.prefix(217)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    var shareSubject: String {
+        "One Fact: \(title)"
     }
 
     enum CodingKeys: String, CodingKey {

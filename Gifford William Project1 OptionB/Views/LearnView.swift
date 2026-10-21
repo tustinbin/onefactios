@@ -133,9 +133,9 @@ struct LearnView: View {
                         viewModel.toggleSaveCurrent()
                     }
 
+                    // Sparkles = “more like this” / add related topics (not a favorite heart).
                     LiquidIconButton(
-                        systemName: viewModel.currentFact.map { viewModel.isHearted($0.id) } == true
-                            ? "heart.fill" : "heart",
+                        systemName: "sparkles",
                         isActive: viewModel.currentFact.map { viewModel.isHearted($0.id) } == true,
                         isEnabled: viewModel.currentFact != nil
                     ) {
@@ -143,13 +143,8 @@ struct LearnView: View {
                     }
 
                     if let fact = viewModel.currentFact {
-                        ShareLink(item: fact.shareText) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AppTheme.inkSoft)
-                                .frame(width: 44, height: 44)
-                        }
-                        .modifier(ShareChrome())
+                        FactShareLink(fact: fact)
+                            .modifier(ShareChrome())
                     } else {
                         LiquidIconButton(systemName: "square.and.arrow.up", isEnabled: false) {}
                     }
@@ -170,6 +165,9 @@ struct LearnView: View {
             }
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity)
+        }
+        .sheet(isPresented: $viewModel.showHeartSheet) {
+            HeartSuggestionsSheet(viewModel: viewModel)
         }
     }
 }

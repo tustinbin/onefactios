@@ -12,41 +12,25 @@ struct InterestsView: View {
                 createCustomNicheCard
 
                 if !viewModel.selectedInterests.isEmpty {
-                    sectionTitle("Currently selected")
+                    sectionTitle("Categories in use")
                     chipGrid(for: viewModel.selectedInterests)
                 }
 
-                sectionTitle("Your additions")
-                if viewModel.additions.isEmpty {
-                    Text("Create a niche above, or heart a fact on Learn to capture topics from it.")
-                        .font(.subheadline)
-                        .foregroundStyle(AppTheme.muted)
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
-                        ForEach(viewModel.additions) { interest in
-                            HStack(spacing: 6) {
-                                Button {
-                                    viewModel.toggleNiche(interest.id)
-                                } label: {
-                                    NicheChip(
-                                        label: interest.label,
-                                        symbolName: interest.symbolName,
-                                        selected: viewModel.selectedIDs.contains(interest.id)
-                                    )
-                                }
-                                .buttonStyle(.plain)
+                additionSection(
+                    title: "Custom Additions",
+                    emptyText: viewModel.additions.contains(where: { $0.source == .custom })
+                        ? "All your typed niches are in use above. Deselect one to park it here."
+                        : "Create a niche above — typed topics land here when not in use.",
+                    interests: viewModel.availableHandwrittenAdditions
+                )
 
-                                Button {
-                                    viewModel.removeAddition(interest.id)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundStyle(AppTheme.muted)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
+                additionSection(
+                    title: "Generated Additions",
+                    emptyText: viewModel.additions.contains(where: { $0.source == .addition })
+                        ? "All sparkle topics are in use above. Deselect one to park it here."
+                        : "Tap sparkles on Learn for “more like this” topics. They land here when not in use.",
+                    interests: viewModel.availableGeneratedAdditions
+                )
 
                 sectionTitle("Browse niches")
                 ForEach(InterestCatalog.groups) { group in
@@ -86,10 +70,46 @@ struct InterestsView: View {
                     .foregroundStyle(AppTheme.accent)
                 }
             }
-            Text("Select niches, create your own, or heart a fact to capture topics.")
+            Text("Put niches in use above. Typed topics park under Custom Additions; sparkle topics under Generated Additions. Delete only from those lists.")
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(AppTheme.inkSoft)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func additionSection(title: String, emptyText: String, interests: [Interest]) -> some View {
+        sectionTitle(title)
+        if interests.isEmpty {
+            Text(emptyText)
+                .font(.subheadline)
+                .foregroundStyle(AppTheme.muted)
+        } else {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                ForEach(interests) { interest in
+                    HStack(spacing: 6) {
+                        Button {
+                            viewModel.toggleNiche(interest.id)
+                        } label: {
+                            NicheChip(
+                                label: interest.label,
+                                symbolName: interest.symbolName,
+                                selected: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            viewModel.removeAddition(interest.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(AppTheme.muted)
+                                .accessibilityLabel("Delete forever")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 

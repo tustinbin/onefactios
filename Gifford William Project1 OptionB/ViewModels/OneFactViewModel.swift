@@ -60,6 +60,10 @@ final class OneFactViewModel: ObservableObject {
     @Published var savedSearchText = ""
     @Published var savedSortField: SavedSortField = .dateAdded
     @Published var savedSortAscending = false
+    @Published var showHeartSheet = false
+    @Published var isLoadingHeartSuggestions = false
+    @Published var heartSuggestions: [Interest] = []
+    @Published var selectedHeartSuggestionIDs: Set<String> = []
     @Published private(set) var didRestore = false
     private var detailTask: Task<Void, Never>?
     private var detailCache: [String: FactDetail] = [:]
@@ -68,6 +72,16 @@ final class OneFactViewModel: ObservableObject {
         selectedIDs.compactMap { id in
             InterestCatalog.leaf(id: id) ?? additions.first { $0.id == id }
         }
+    }
+
+    /// Niches you typed yourself, not currently selected.
+    var availableHandwrittenAdditions: [Interest] {
+        additions.filter { $0.source == .custom && !selectedIDs.contains($0.id) }
+    }
+
+    /// Sparkle / “more like this” niches, not currently selected.
+    var availableGeneratedAdditions: [Interest] {
+        additions.filter { $0.source == .addition && !selectedIDs.contains($0.id) }
     }
 
     /// Interests mode only sticks when at least one niche is selected.
@@ -581,37 +595,111 @@ final class OneFactViewModel: ObservableObject {
         showToast("Removed from saved")
     }
 
+    /// Filled when this fact already contributed topics via “more like this”.
     func isHearted(_ id: String) -> Bool {
         heartedIDs.contains(id)
     }
 
+    /// Opens topic suggestions. Does not mark the fact until topics are actually added.
     func heartCurrent() async {
         guard let fact = currentFact else { return }
-        if heartedIDs.contains(fact.id) {
-            heartedIDs.removeAll { $0 == fact.id }
-            showToast("Removed")
-            persistSoon()
-            return
-        }
-        heartedIDs.append(fact.id)
-        persistSoon()
+
+        selectedHeartSuggestionIDs = []
+        heartSuggestions = []
+        isLoadingHeartSuggestions = true
+        showHeartSheet = true
 
         do {
             let categories = try await wikipedia.fetchCategoryTitles(forArticleTitle: fact.lookupTitle)
-            var added = 0
-            for title in categories {
-                guard let interest = FactFactory.interestFromCategoryTitle(title) else { continue }
-                if InterestCatalog.leaf(id: interest.id) != nil { continue }
-                if additions.contains(where: { $0.id == interest.id }) { continue }
-                additions.insert(interest, at: 0)
-                added += 1
-                if added >= 4 { break }
+            let suggestions = FactFactory.heartSuggestions(categories: categories, fact: fact, limit: 8)
+            heartSuggestions = suggestions
+            // Pre-select broader catalog hits; leave brand-new additions unchecked.
+            selectedHeartSuggestionIDs = Set(
+                suggestions
+                    .filter { $0.source == .default }
+                    .prefix(3)
+                    .map(\.id)
+            )
+            isLoadingHeartSuggestions = false
+            if suggestions.isEmpty {
+                showToast("No broad topics found for this fact")
             }
-            showToast(added > 1 ? "Added \(added) to interests" : "Added to interests")
-            persistSoon()
         } catch {
-            showToast("Added to interests")
+            isLoadingHeartSuggestions = false
+            heartSuggestions = []
+            showToast("Couldn’t load topic suggestions")
         }
+    }
+
+    func toggleHeartSuggestion(_ id: String) {
+        if selectedHeartSuggestionIDs.contains(id) {
+            selectedHeartSuggestionIDs.remove(id)
+        } else {
+            selectedHeartSuggestionIDs.insert(id)
+        }
+    }
+
+    /// Add checked suggestions to Your additions (available niches), without forcing Interests mode.
+    func confirmHeartSuggestionsAddOnly() {
+        let hadSelection = !selectedHeartSuggestionIDs.isEmpty
+        let count = applyHeartSuggestions(selectForSearch: false)
+        dismissHeartSheet()
+        guard hadSelection else { return }
+        if count == 0 {
+            showToast("Already in your interests")
+        } else {
+            showToast(count == 1 ? "Added to Interests" : "Added \(count) to Interests")
+        }
+    }
+
+    /// Add checked suggestions and select them for Interests search.
+    func confirmHeartSuggestionsAddAndUse() {
+        let hadSelection = !selectedHeartSuggestionIDs.isEmpty
+        let count = applyHeartSuggestions(selectForSearch: true)
+        dismissHeartSheet()
+        guard hadSelection else { return }
+        mode = .interests
+        if count == 0 {
+            showToast("Using your selected interests")
+        } else {
+            showToast(count == 1 ? "Added & selected" : "Added & selected \(count)")
+        }
+    }
+
+    func dismissHeartSheet() {
+        showHeartSheet = false
+        heartSuggestions = []
+        selectedHeartSuggestionIDs = []
+        isLoadingHeartSuggestions = false
+    }
+
+    @discardableResult
+    private func applyHeartSuggestions(selectForSearch: Bool) -> Int {
+        let selected = heartSuggestions.filter { selectedHeartSuggestionIDs.contains($0.id) }
+        guard !selected.isEmpty else { return 0 }
+
+        var changed = 0
+        for interest in selected {
+            let isCatalog = InterestCatalog.leaf(id: interest.id) != nil
+            if !isCatalog, !additions.contains(where: { $0.id == interest.id }) {
+                additions.insert(interest, at: 0)
+                changed += 1
+            }
+            if selectForSearch, !selectedIDs.contains(interest.id) {
+                selectedIDs.append(interest.id)
+                if isCatalog { changed += 1 }
+            }
+        }
+        if additions.count > 40 {
+            additions = Array(additions.prefix(40))
+        }
+        // Mark only after the user confirms with at least one topic selected.
+        // (Not now leaves the sparkles button inactive.)
+        if let factID = currentFact?.id, !heartedIDs.contains(factID) {
+            heartedIDs.append(factID)
+        }
+        persistSoon()
+        return changed
     }
 
     var shareText: String {
